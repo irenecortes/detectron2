@@ -25,7 +25,7 @@ from detectron2.utils.logger import create_small_table
 from .evaluator import DatasetEvaluator
 
 
-class COCOEvaluator(DatasetEvaluator):
+class nuScenesEvaluator(DatasetEvaluator):
     """
     Evaluate object proposal, instance detection/segmentation, keypoint detection
     outputs using COCO's metrics and APIs.
@@ -79,6 +79,7 @@ class COCOEvaluator(DatasetEvaluator):
         # Test set json files do not contain annotations (evaluation must be
         # performed using the COCO evaluation server).
         self._do_evaluation = "annotations" in self._coco_api.dataset
+        print('self._do_evaluation', self._do_evaluation)
 
     def reset(self):
         self._predictions = []
@@ -93,8 +94,8 @@ class COCOEvaluator(DatasetEvaluator):
             tasks = tasks + ("segm",)
         if cfg.MODEL.KEYPOINT_ON:
             tasks = tasks + ("keypoints",)
-        if cfg.MODEL.EMBEDDING_ON:
-            tasks = tasks + ("embeddings",)
+        # if cfg.MODEL.EMBEDDING_ON:
+        #     tasks = tasks + ("embeddings",)
         return tasks
 
     def process(self, inputs, outputs):
@@ -108,7 +109,6 @@ class COCOEvaluator(DatasetEvaluator):
         """
         for input, output in zip(inputs, outputs):
             prediction = {"image_id": input["image_id"]}
-
             # TODO this is ugly
             if "instances" in output:
                 instances = output["instances"].to(self._cpu_device)
@@ -116,6 +116,7 @@ class COCOEvaluator(DatasetEvaluator):
             if "proposals" in output:
                 prediction["proposals"] = output["proposals"].to(self._cpu_device)
             self._predictions.append(prediction)
+
 
     def evaluate(self):
         if self._distributed:
@@ -167,7 +168,6 @@ class COCOEvaluator(DatasetEvaluator):
                     category_id
                 )
                 result["category_id"] = reverse_id_mapping[category_id]
-
         if self._output_dir:
             file_path = os.path.join(self._output_dir, "coco_instances_results.json")
             self._logger.info("Saving results to {}".format(file_path))
@@ -506,6 +506,9 @@ def _evaluate_predictions_on_coco(coco_gt, coco_results, iou_type, kpt_oks_sigma
             "keypoints! For more information please refer to "
             "http://cocodataset.org/#keypoints-eval.".format(num_keypoints)
         )
+
+    if iou_type == "embeddings":
+        print('HELLO, here it is supposed to be the evaluation of the embeddings. CIAO.')
 
     coco_eval.evaluate()
     coco_eval.accumulate()

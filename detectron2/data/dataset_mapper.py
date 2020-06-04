@@ -47,6 +47,7 @@ class DatasetMapper:
         self.mask_on        = cfg.MODEL.MASK_ON
         self.mask_format    = cfg.INPUT.MASK_FORMAT
         self.keypoint_on    = cfg.MODEL.KEYPOINT_ON
+        self.embedding_on   = cfg.MODEL.EMBEDDING_ON
         self.load_proposals = cfg.MODEL.LOAD_PROPOSALS
         # fmt: on
         if self.keypoint_on and is_train:
@@ -64,7 +65,7 @@ class DatasetMapper:
             )
         self.is_train = is_train
 
-    def __call__(self, dataset_dict):
+    def __call__(self, dataset_dict, do_flip=None):
         """
         Args:
             dataset_dict (dict): Metadata of one image, in Detectron2 Dataset format.
@@ -91,7 +92,8 @@ class DatasetMapper:
                     np.random.choice(dataset_dict["annotations"]),
                 )
                 image = crop_tfm.apply_image(image)
-            image, transforms = T.apply_transform_gens(self.tfm_gens, image)
+            # print('do_flip', do_flip)
+            image, transforms = T.apply_transform_gens(self.tfm_gens, image, do_flip)
             if self.crop_gen:
                 transforms = crop_tfm + transforms
 
@@ -121,6 +123,8 @@ class DatasetMapper:
                     anno.pop("segmentation", None)
                 if not self.keypoint_on:
                     anno.pop("keypoints", None)
+                if not self.embedding_on:
+                    anno.pop("token", None)
 
             # USER: Implement additional transformations if you have other types of data
             annos = [

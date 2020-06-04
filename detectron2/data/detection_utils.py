@@ -18,6 +18,7 @@ from detectron2.structures import (
     BoxMode,
     Instances,
     Keypoints,
+    Tokens,
     PolygonMasks,
     RotatedBoxes,
     polygons_to_bitmask,
@@ -342,6 +343,10 @@ def annotations_to_instances(annos, image_size, mask_format="polygon"):
     if len(annos) and "keypoints" in annos[0]:
         kpts = [obj.get("keypoints", []) for obj in annos]
         target.gt_keypoints = Keypoints(kpts)
+    
+    if len(annos) and "token" in annos[0]:
+        tokens = [obj.get("token", []) for obj in annos]
+        target.gt_tokens = Tokens(tokens)
 
     return target
 
@@ -510,7 +515,11 @@ def build_transform_gen(cfg, is_train):
     logger = logging.getLogger(__name__)
     tfm_gens = []
     tfm_gens.append(T.ResizeShortestEdge(min_size, max_size, sample_style))
-    if is_train:
-        tfm_gens.append(T.RandomFlip())
+    if is_train and cfg.DATALOADER.HFLIP:
+        if not cfg.DATALOADER.SAMPLER_TRAIN == "RingTrainingSampler":
+            tfm_gens.append(T.RandomFlip())
+        # elif cfg.DATALOADER.SAMPLER_TRAIN == "RingTrainingSampler":
+        #     tfm_gens.append(T.RandomRingFlip(cfg.SOLVER.IMS_PER_BATCH))
         logger.info("TransformGens used in training: " + str(tfm_gens))
+
     return tfm_gens

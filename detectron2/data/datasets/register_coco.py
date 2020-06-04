@@ -42,7 +42,6 @@ def register_coco_instances(name, metadata, json_file, image_root):
         json_file=json_file, image_root=image_root, evaluator_type="coco", **metadata
     )
 
-
 def register_coco_panoptic_separated(
     name, metadata, image_root, panoptic_root, panoptic_json, sem_seg_root, instances_json
 ):

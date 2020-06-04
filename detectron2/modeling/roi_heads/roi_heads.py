@@ -18,6 +18,7 @@ from ..poolers import ROIPooler
 from ..proposal_generator.proposal_utils import add_ground_truth_to_proposals
 from ..sampling import subsample_labels
 from .box_head import build_box_head
+from .embedding_head import build_embedding_head
 from .fast_rcnn import FastRCNNOutputLayers
 from .keypoint_head import build_keypoint_head
 from .mask_head import build_mask_head
@@ -499,6 +500,8 @@ class StandardROIHeads(ROIHeads):
         keypoint_in_features: Optional[List[str]] = None,
         keypoint_pooler: Optional[ROIPooler] = None,
         keypoint_head: Optional[nn.Module] = None,
+        embedding_in_features: Optional[List[str]] = None,
+        embedding_head: Optional[nn.Module] = None,
         train_on_pred_boxes: bool = False,
         **kwargs
     ):
@@ -531,6 +534,12 @@ class StandardROIHeads(ROIHeads):
             self.mask_in_features = mask_in_features
             self.mask_pooler = mask_pooler
             self.mask_head = mask_head
+
+        self.embedding_on = embedding_in_features is not None
+        if self.embedding_on:
+            self.embedding_in_features = embedding_in_features
+            self.embedding_head = embedding_head
+
         self.keypoint_on = keypoint_in_features is not None
         if self.keypoint_on:
             self.keypoint_in_features = keypoint_in_features
@@ -552,6 +561,8 @@ class StandardROIHeads(ROIHeads):
             ret.update(cls._init_box_head(cfg, input_shape))
         if inspect.ismethod(cls._init_mask_head):
             ret.update(cls._init_mask_head(cfg, input_shape))
+        if inspect.ismethod(cls._init_embedding_head):
+            ret.update(cls._init_embedding_head(cfg, input_shape))
         if inspect.ismethod(cls._init_keypoint_head):
             ret.update(cls._init_keypoint_head(cfg, input_shape))
         return ret
@@ -592,6 +603,31 @@ class StandardROIHeads(ROIHeads):
             "box_head": box_head,
             "box_predictor": box_predictor,
         }
+
+    @classmethod
+    def _init_embedding_head(cls, cfg, input_shape):
+        # fmt: off
+        print('Embedding on: ', cfg.MODEL.EMBEDDING_ON)
+        if not cfg.MODEL.EMBEDDING_ON:
+            return {}
+
+        in_features       = cfg.MODEL.ROI_HEADS.IN_FEATURES
+        pooler_resolution = cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION
+        # fmt: on
+
+        # If StandardROIHeads is applied on multiple feature maps (as in FPN),
+        # then we share the same predictors and therefore the channel counts must be the same
+        in_channels = [input_shape[f].channels for f in in_features][0]
+
+        ret = {"embedding_in_features": in_features}
+
+        # Here we split "box head" and "box predictor", which is mainly due to historical reasons.
+        # They are used together so the "box predictor" layers should be part of the "box head".
+        # New subclasses of ROIHeads do not need "box predictor"s.
+        ret['embedding_head'] = build_embedding_head(
+            cfg, ShapeSpec(channels=in_channels, height=pooler_resolution, width=pooler_resolution)
+        )
+        return ret
 
     @classmethod
     def _init_mask_head(cls, cfg, input_shape):
@@ -651,6 +687,7 @@ class StandardROIHeads(ROIHeads):
         features: Dict[str, torch.Tensor],
         proposals: List[Instances],
         targets: Optional[List[Instances]] = None,
+        image_names: List[str] = None,
     ) -> Tuple[List[Instances], Dict[str, torch.Tensor]]:
         """
         See :class:`ROIHeads.forward`.
@@ -662,19 +699,26 @@ class StandardROIHeads(ROIHeads):
         del targets
 
         if self.training:
-            losses = self._forward_box(features, proposals)
+            losses, res4_features = self._forward_box(features, proposals)
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head.
             losses.update(self._forward_mask(features, proposals))
             losses.update(self._forward_keypoint(features, proposals))
+            losses.update(self._forward_embedding(res4_features, proposals, image_names))
             return proposals, losses
         else:
-            pred_instances = self._forward_box(features, proposals)
+            pred_instances, box_features_list = self._forward_box(features, proposals)
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(features, pred_instances)
-            return pred_instances, {}
+
+            if self.embedding_on:
+                pred_instances = self._forward_embedding(box_features_list, pred_instances, image_names)
+                return pred_instances, {}
+            else: 
+                return pred_instances, {}
+
 
     def forward_with_given_boxes(
         self, features: Dict[str, torch.Tensor], instances: List[Instances]
@@ -705,7 +749,7 @@ class StandardROIHeads(ROIHeads):
 
     def _forward_box(
         self, features: Dict[str, torch.Tensor], proposals: List[Instances]
-    ) -> Union[Dict[str, torch.Tensor], List[Instances]]:
+    ) -> Tuple[Union[Dict[str, torch.Tensor], List[Instances]], List[torch.Tensor]]:
         """
         Forward logic of the box prediction branch. If `self.train_on_pred_boxes is True`,
             the function puts predicted boxes in the `proposal_boxes` field of `proposals` argument.
@@ -723,10 +767,17 @@ class StandardROIHeads(ROIHeads):
             In inference, a list of `Instances`, the predicted instances.
         """
         features = [features[f] for f in self.box_in_features]
-        box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
-        box_features = self.box_head(box_features)
-        predictions = self.box_predictor(box_features)
-        del box_features
+        box_features_1 = self.box_pooler(features, [x.proposal_boxes for x in proposals])
+        box_features_2 = self.box_head(box_features_1)
+
+        res4_features = []
+        idx_init = 0
+        for x in proposals:
+            res4_features.append(torch.unsqueeze(box_features_1[idx_init:idx_init+len(x.proposal_boxes)], 0))
+            idx_init = idx_init+len(x.proposal_boxes)
+
+        predictions = self.box_predictor(box_features_2)
+        del box_features_2
 
         if self.training:
             losses = self.box_predictor.losses(predictions, proposals)
@@ -738,10 +789,59 @@ class StandardROIHeads(ROIHeads):
                     )
                     for proposals_per_image, pred_boxes_per_image in zip(proposals, pred_boxes):
                         proposals_per_image.proposal_boxes = Boxes(pred_boxes_per_image)
-            return losses
+            return losses, res4_features
         else:
-            pred_instances, _ = self.box_predictor.inference(predictions, proposals)
-            return pred_instances
+            pred_instances, filter_idx = self.box_predictor.inference(predictions, proposals)
+            
+        box_features_filtered = [box_features_1[filter_idx[idx]] for idx in range(len(filter_idx))]
+        del box_features_1
+
+        return pred_instances, box_features_filtered
+
+    def _forward_embedding(self, features, instances, image_names):
+        """
+        Forward logic of the box prediction branch.
+
+        Args:
+            features (list[Tensor]): #level input features for box prediction
+            proposals (list[Instances]): the per-image object proposals with
+                their matching ground truth.
+                Each has fields "proposal_boxes", and "objectness_logits",
+                "gt_classes", "gt_boxes".
+
+        Returns:
+            In training, a dict of losses.
+            In inference, a list of `Instances`, the predicted instances.
+        """
+        if not self.embedding_on:
+            return {}
+
+
+        if self.training:
+            proposals, foreground_mask = select_foreground_proposals(instances, self.num_classes)
+            if len(proposals) > 0:
+                pred_embeddings = []
+                for box_feat, fg_mask in zip(features, foreground_mask):
+                    box_features = torch.squeeze(box_feat, 0)[fg_mask]
+                    if box_features.size()[0] > 0:
+                        embeddings = self.embedding_head(box_features)
+                        del box_features
+                    else:
+                        embeddings = torch.tensor([]).cuda()
+                    pred_embeddings.append(embeddings)
+
+                return {'loss_embedding': self.embedding_head.embedding_loss(pred_embeddings, proposals, image_names)}
+            else: return {}
+        
+        else:
+            for box_features, instance in zip(features, instances):
+                if box_features.size()[0] > 0:
+                    embeddings = self.embedding_head(box_features)
+                else:
+                    embeddings = torch.tensor([]).cuda()
+
+                instance.pred_embedding = embeddings
+            return instances
 
     def _forward_mask(
         self, features: Dict[str, torch.Tensor], instances: List[Instances]

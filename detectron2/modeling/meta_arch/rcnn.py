@@ -127,7 +127,8 @@ class GeneralizedRCNN(nn.Module):
             proposals = [x["proposals"].to(self.device) for x in batched_inputs]
             proposal_losses = {}
 
-        _, detector_losses = self.roi_heads(images, features, proposals, gt_instances)
+        image_names = [x["file_name"] for x in batched_inputs]
+        _, detector_losses = self.roi_heads(images, features, proposals, gt_instances, image_names)
         if self.vis_period > 0:
             storage = get_event_storage()
             if storage.iter % self.vis_period == 0:
@@ -158,11 +159,29 @@ class GeneralizedRCNN(nn.Module):
         assert not self.training
 
         images = self.preprocess_image(batched_inputs)
+        if "instances" in batched_inputs[0]:
+            gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
+        else:
+            gt_instances = None
+
         features = self.backbone(images.tensor)
 
         if detected_instances is None:
             if self.proposal_generator:
-                proposals, _ = self.proposal_generator(images, features, None)
+                proposals, _ = self.proposal_generator(images, features, gt_instances)
+
+                if "instances" in batched_inputs[0].keys():
+                    gt_proposals = [Instances((images.image_sizes[0][0], images.image_sizes[0][1]))]
+                    for idx in range(len(gt_instances)):
+                        gt_proposals[idx].proposal_boxes = gt_instances[idx].gt_boxes
+
+                        scale_x, scale_y = (images[idx].image_sizes[0][1] / batched_inputs[0].get("width"), images[idx].image_sizes[0][0] / batched_inputs[0].get("height"))
+
+                        gt_proposals[idx].proposal_boxes.scale(scale_x, scale_y)
+                        gt_proposals[idx].proposal_boxes.clip((images[idx].image_sizes[0][0], images[idx].image_sizes[0][1]))
+
+                        gt_proposals[idx].objectness_logits = torch.as_tensor(torch.ones(len(gt_proposals[idx].proposal_boxes))*math.log((1.0 - 1e-10) / (1 - (1.0 - 1e-10))))
+                    proposals = gt_proposals.copy()
             else:
                 assert "proposals" in batched_inputs[0]
                 proposals = [x["proposals"].to(self.device) for x in batched_inputs]

@@ -26,7 +26,9 @@ __all__ = [
     "RandomContrast",
     "RandomCrop",
     "RandomExtent",
+    "Flip",
     "RandomFlip",
+    "RandomRingFlip",
     "RandomSaturation",
     "RandomLighting",
     "RandomRotation",
@@ -146,7 +148,7 @@ class RandomApply(TransformGen):
                 return self.transform
         else:
             return NoOpTransform()
-
+ 
 
 class RandomFlip(TransformGen):
     """
@@ -177,6 +179,82 @@ class RandomFlip(TransformGen):
             elif self.vertical:
                 return VFlipTransform(h)
         else:
+            return NoOpTransform()
+
+class Flip(TransformGen):
+    """
+    Flip the image horizontally or vertically with the given probability.
+    """
+
+    def __init__(self, horizontal=True, vertical=False):
+        """
+        Args:
+            prob (float): probability of flip.
+            horizontal (boolean): whether to apply horizontal flipping
+            vertical (boolean): whether to apply vertical flipping
+        """
+        super().__init__()
+
+        if horizontal and vertical:
+            raise ValueError("Cannot do both horiz and vert. Please use two Flip instead.")
+        if not horizontal and not vertical:
+            raise ValueError("At least one of horiz or vert has to be True!")
+        self._init(locals())
+
+    def get_transform(self, img):
+        h, w = img.shape[:2]
+        if self.horizontal:
+            return HFlipTransform(w)
+        elif self.vertical:
+            return VFlipTransform(h)
+
+
+class RandomRingFlip(TransformGen):
+    """
+    Flip the image horizontally or vertically with the given probability.
+    """
+
+    def __init__(self, ring, prob=0.5, horizontal=True, vertical=False):
+        """
+        Args:
+            prob (float): probability of flip.
+            horizontal (boolean): whether to apply horizontal flipping
+            vertical (boolean): whether to apply vertical flipping
+        """
+        super().__init__()
+
+        if horizontal and vertical:
+            raise ValueError("Cannot do both horiz and vert. Please use two Flip instead.")
+        if not horizontal and not vertical:
+            raise ValueError("At least one of horiz or vert has to be True!")
+        self._init(locals())
+        self.do = [self._rand_range() < self.prob]*self.ring
+        self.idx = 0
+
+
+    def get_transform(self, img):
+        h, w = img.shape[:2]
+        
+        do = self.do[self.idx]
+        # print('idx', self.idx)
+        # print('do', do)
+        # print('self.do', self.do)
+        
+        self.idx += 1
+        if self.idx == self.ring:
+            self.idx = 0
+            self.do = [self._rand_range() < self.prob]*self.ring
+
+        if do:
+            if self.horizontal:
+                # print('HFlipTransform')
+                return HFlipTransform(w)
+                # print([HFlipTransform(w)]*self.ring)
+                # yield from [HFlipTransform(w)]*self.ring
+            elif self.vertical:
+                return VFlipTransform(h)
+        else:
+            # print('NoOpTransform')
             return NoOpTransform()
 
 
@@ -501,7 +579,7 @@ class RandomLighting(TransformGen):
         )
 
 
-def apply_transform_gens(transform_gens, img):
+def apply_transform_gens(transform_gens, img, do_flip=None):
     """
     Apply a list of :class:`TransformGen` or :class:`Transform` on the input image, and
     returns the transformed image and a list of transforms.
@@ -525,6 +603,17 @@ def apply_transform_gens(transform_gens, img):
     check_dtype(img)
 
     tfms = []
+
+    if do_flip:
+        g = Flip()
+        tfm = g.get_transform(img) if isinstance(g, TransformGen) else g
+        assert isinstance(
+            tfm, Transform
+        ), "TransformGen {} must return an instance of Transform! Got {} instead".format(g, tfm)
+        img = tfm.apply_image(img)
+        tfms.append(tfm)
+
+
     for g in transform_gens:
         tfm = g.get_transform(img) if isinstance(g, TransformGen) else g
         assert isinstance(
@@ -532,4 +621,6 @@ def apply_transform_gens(transform_gens, img):
         ), "TransformGen {} must return an instance of Transform! Got {} instead".format(g, tfm)
         img = tfm.apply_image(img)
         tfms.append(tfm)
+
+    # print('applied transforms:', tfms)
     return img, TransformList(tfms)

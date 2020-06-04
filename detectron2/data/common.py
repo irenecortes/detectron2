@@ -29,14 +29,37 @@ class MapDataset(data.Dataset):
 
         self._rng = random.Random(42)
         self._fallback_candidates = set(range(len(dataset)))
+        # self._hflip_indices = {}
+        # self._ring_size = ring_size
 
     def __len__(self):
         return len(self._dataset)
 
+    def get_flipped_item(self, idx, flip_image):
+        retry_count = 0
+        cur_idx = int(idx)
+        while True:
+            data = self._map_func(self._dataset[cur_idx], do_flip=flip_image)
+            if data is not None:
+                self._fallback_candidates.add(cur_idx)
+                return data
+
+            # _map_func fails for this idx, use a random new index from the pool
+            retry_count += 1
+            self._fallback_candidates.discard(cur_idx)
+            cur_idx = self._rng.sample(self._fallback_candidates, k=1)[0]
+
+            if retry_count >= 3:
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "Failed to apply `_map_func` for idx: {}, retry count: {}".format(
+                        idx, retry_count
+                    )
+                )
+
     def __getitem__(self, idx):
         retry_count = 0
         cur_idx = int(idx)
-
         while True:
             data = self._map_func(self._dataset[cur_idx])
             if data is not None:
@@ -147,3 +170,4 @@ class AspectRatioGroupedDataset(data.IterableDataset):
             if len(bucket) == self.batch_size:
                 yield bucket[:]
                 del bucket[:]
+

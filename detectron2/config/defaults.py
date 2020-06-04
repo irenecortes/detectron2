@@ -24,6 +24,8 @@ _C.VERSION = 2
 _C.MODEL = CN()
 _C.MODEL.LOAD_PROPOSALS = False
 _C.MODEL.MASK_ON = False
+# siaNMS
+_C.MODEL.EMBEDDING_ON = False
 _C.MODEL.KEYPOINT_ON = False
 _C.MODEL.DEVICE = "cuda"
 _C.MODEL.META_ARCHITECTURE = "GeneralizedRCNN"
@@ -111,8 +113,9 @@ _C.DATALOADER.NUM_WORKERS = 4
 # is compatible. This groups portrait images together, and landscape images
 # are not batched with portrait images.
 _C.DATALOADER.ASPECT_RATIO_GROUPING = True
-# Options: TrainingSampler, RepeatFactorTrainingSampler
+# Options: TrainingSampler, RepeatFactorTrainingSampler, RingTrainingSampler
 _C.DATALOADER.SAMPLER_TRAIN = "TrainingSampler"
+_C.DATALOADER.HFLIP = True
 # Repeat threshold for RepeatFactorTrainingSampler
 _C.DATALOADER.REPEAT_THRESHOLD = 0.0
 # if True, the dataloader will filter out images that have no associated
@@ -274,6 +277,15 @@ _C.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.5
 _C.MODEL.ROI_HEADS.PROPOSAL_APPEND_GT = True
 
 # ---------------------------------------------------------------------------- #
+# Embedding Head (siaNMS)
+# ---------------------------------------------------------------------------- #
+_C.MODEL.EMBEDDING_HEAD = CN()
+_C.MODEL.EMBEDDING_HEAD.NAME = "EmbeddingHead"
+_C.MODEL.EMBEDDING_HEAD.NUM_OUTPUT = 2
+_C.MODEL.EMBEDDING_HEAD.LOSS_FN = "DoubleMarginContrastiveLoss"
+ 
+
+# ---------------------------------------------------------------------------- #
 # Box Head
 # ---------------------------------------------------------------------------- #
 _C.MODEL.ROI_BOX_HEAD = CN()
@@ -321,6 +333,7 @@ _C.MODEL.ROI_BOX_CASCADE_HEAD.IOUS = (0.5, 0.6, 0.7)
 # Mask Head
 # ---------------------------------------------------------------------------- #
 _C.MODEL.ROI_MASK_HEAD = CN()
+_C.MODEL.ROI_MASK_HEAD.FREEZE = False
 _C.MODEL.ROI_MASK_HEAD.NAME = "MaskRCNNConvUpsampleHead"
 _C.MODEL.ROI_MASK_HEAD.POOLER_RESOLUTION = 14
 _C.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO = 0

@@ -9,6 +9,7 @@ import tempfile
 import time
 from collections import Counter
 import torch
+import numpy as np
 from fvcore.common.checkpoint import PeriodicCheckpointer as _PeriodicCheckpointer
 from fvcore.common.file_io import PathManager
 from fvcore.common.timer import Timer
@@ -328,7 +329,10 @@ class EvalHook(HookBase):
                 results, dict
             ), "Eval function must return a dict. Got {} instead.".format(results)
 
+            print('Before flatten: ', results)
             flattened_results = flatten_results_dict(results)
+            print('After flatten: ', flattened_results)
+
             for k, v in flattened_results.items():
                 try:
                     v = float(v)
@@ -353,6 +357,66 @@ class EvalHook(HookBase):
         # func is likely a closure that holds reference to the trainer
         # therefore we clean it to avoid circular reference in the end
         del self._func
+
+class EvalandSaveHook(EvalHook, _PeriodicCheckpointer):
+    def __init__(self, checkpointer, eval_period, eval_function):
+        """
+        Args:
+            eval_period (int): the period to run `eval_function`.
+            eval_function (callable): a function which takes no arguments, and
+                returns a nested dict of evaluation metrics.
+
+        Note:
+            This hook must be enabled in all or none workers.
+            If you would like only certain workers to perform evaluation,
+            give other workers a no-op function (`eval_function=lambda: None`).
+        """
+        self._period = eval_period
+        self._func = eval_function
+        self.checkpointer = checkpointer
+        self._best_AP = 0.0
+        self._best_AP_carpedcyc = 0.0
+
+    def _do_eval(self):
+        results = self._func()
+
+        if results:
+            assert isinstance(
+                results, dict
+            ), "Eval function must return a dict. Got {} instead.".format(results)
+
+            print('Before flatten: ', results)
+            flattened_results = flatten_results_dict(results)
+            print('After flatten: ', flattened_results)
+
+            for k, v in flattened_results.items():
+                try:
+                    v = float(v)
+                except Exception:
+                    raise ValueError(
+                        "[EvalHook] eval_function should return a nested dict of float. "
+                        "Got '{}: {}' instead.".format(k, v)
+                    )
+            self.trainer.storage.put_scalars(**flattened_results, smoothing_hint=False)
+
+        # Evaluation may take different time among workers.
+        # A barrier make them start the next iteration together.
+        comm.synchronize()
+        if results:
+            if flattened_results['bbox/AP'] > self._best_AP:
+                self._best_AP = flattened_results['bbox/AP']
+                print('self._best_AP', self._best_AP)
+                print('Improving! Should save new checkpoing')
+                self.save('best_AP_model')
+
+            if np.isfinite(flattened_results['bbox/AP-Car']) and \
+                np.isfinite(flattened_results['bbox/AP-Pedestrian']) and \
+                np.isfinite(flattened_results['bbox/AP-Cyclist']) and \
+                (flattened_results['bbox/AP-Car'] + flattened_results['bbox/AP-Pedestrian'] + flattened_results['bbox/AP-Cyclist'])/3.0 > self._best_AP_carpedcyc:
+                self._best_AP_carpedcyc = (flattened_results['bbox/AP-Car'] + flattened_results['bbox/AP-Pedestrian'] + flattened_results['bbox/AP-Cyclist'])/3.0 
+                print('self._best_AP_carpedcyc', self._best_AP_carpedcyc)
+                print('Improving! Should save new checkpoing')
+                self.save('best_AP_carpedcyc_model')
 
 
 class PreciseBN(HookBase):

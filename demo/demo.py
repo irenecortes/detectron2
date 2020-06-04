@@ -7,6 +7,7 @@ import time
 import cv2
 import tqdm
 
+import sys
 from detectron2.config import get_cfg
 from detectron2.data.detection_utils import read_image
 from detectron2.utils.logger import setup_logger
@@ -107,7 +108,11 @@ if __name__ == "__main__":
                 visualized_output.save(out_filename)
             else:
                 cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-                cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
+                if visualized_output is not None:
+                    cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
+                else:
+                    cv2.imshow(WINDOW_NAME, img)
+                    
                 if cv2.waitKey(0) == 27:
                     break  # esc to quit
     elif args.webcam:

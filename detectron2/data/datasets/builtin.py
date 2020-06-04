@@ -25,6 +25,7 @@ from .builtin_meta import _get_builtin_metadata
 from .cityscapes import load_cityscapes_instances, load_cityscapes_semantic
 from .lvis import get_lvis_instances_meta, register_lvis_instances
 from .pascal_voc import register_pascal_voc
+from .nuscenes import register_nuscenes, load_and_register_nuscenes
 from .register_coco import register_coco_instances, register_coco_panoptic_separated
 
 # ==== Predefined datasets and splits for COCO ==========
@@ -212,9 +213,32 @@ def register_all_pascal_voc(root):
         MetadataCatalog.get(name).evaluator_type = "pascal_voc"
 
 
+# ==== Predefined splits for PASCAL VOC ===========
+def register_all_nuscenes(root):
+    SPLITS = [
+        ("nuscenes_trainval", "trainval"),
+        ("nuscenes_train", "train"),
+        ("nuscenes_val", "val"),
+        ("nuscenes_minitrain", "minitrain"),
+        ("nuscenes_minival", "minival"),
+        ("nuscenes_trainval_ring", "trainval_ring"),
+        ("nuscenes_train_ring", "train_ring"),
+        ("nuscenes_val_ring", "val_ring"),
+        ("nuscenes_minitrain_ring", "minitrain_ring"),
+        ("nuscenes_minival_ring", "minival_ring"),
+    ]
+    for name, split in SPLITS:
+        register_nuscenes(name, '/raid/datasets/token_nuscenes', split)
+        MetadataCatalog.get(name).evaluator_type = "nuscenes"
+
+    # for name, split in SPLITS:
+    #     load_and_register_nuscenes(name, '/raid/datasets/token_nuscenes', split)
+    #     MetadataCatalog.get(name).evaluator_type = "coco"
+
 # Register them all under "./datasets"
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
 register_all_coco(_root)
 register_all_lvis(_root)
 register_all_cityscapes(_root)
 register_all_pascal_voc(_root)
+register_all_nuscenes(_root)

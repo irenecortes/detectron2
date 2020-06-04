@@ -20,6 +20,7 @@ from . import samplers
 from .catalog import DatasetCatalog, MetadataCatalog
 from .common import AspectRatioGroupedDataset, DatasetFromList, MapDataset
 from .dataset_mapper import DatasetMapper
+from .data_loader import TestDataLoader
 from .detection_utils import check_metadata_consistency
 
 """
@@ -254,7 +255,7 @@ def get_detection_dataset_dicts(
 
 
 def build_batch_data_loader(
-    dataset, sampler, total_batch_size, *, aspect_ratio_grouping=False, num_workers=0
+    dataset, sampler, total_batch_size, *, aspect_ratio_grouping=False, horizontal_flip_grouping=False, num_workers=0
 ):
     """
     Build a batched dataloader for training.
@@ -280,7 +281,17 @@ def build_batch_data_loader(
     )
 
     batch_size = total_batch_size // world_size
-    if aspect_ratio_grouping:
+    if horizontal_flip_grouping and aspect_ratio_grouping:
+        data_loader = TestDataLoader(
+            dataset,
+            sampler=sampler,
+            num_workers=num_workers,
+            batch_sampler=None,
+            collate_fn=operator.itemgetter(0),  # don't batch, but yield individual elements
+            worker_init_fn=worker_init_reset_seed,
+        )  # yield individual mapped dict
+        return AspectRatioGroupedDataset(data_loader, batch_size)
+    elif aspect_ratio_grouping:
         data_loader = torch.utils.data.DataLoader(
             dataset,
             sampler=sampler,
@@ -344,6 +355,8 @@ def build_detection_train_loader(cfg, mapper=None):
     # TODO avoid if-else?
     if sampler_name == "TrainingSampler":
         sampler = samplers.TrainingSampler(len(dataset))
+    elif sampler_name == "RingTrainingSampler":
+        sampler = samplers.RingTrainingSampler(len(dataset), flip=cfg.DATALOADER.HFLIP)
     elif sampler_name == "RepeatFactorTrainingSampler":
         sampler = samplers.RepeatFactorTrainingSampler(
             dataset_dicts, cfg.DATALOADER.REPEAT_THRESHOLD
@@ -355,6 +368,7 @@ def build_detection_train_loader(cfg, mapper=None):
         sampler,
         cfg.SOLVER.IMS_PER_BATCH,
         aspect_ratio_grouping=cfg.DATALOADER.ASPECT_RATIO_GROUPING,
+        horizontal_flip_grouping=sampler_name == "RingTrainingSampler",
         num_workers=cfg.DATALOADER.NUM_WORKERS,
     )
 
@@ -403,7 +417,6 @@ def build_detection_test_loader(cfg, dataset_name, mapper=None):
         collate_fn=trivial_batch_collator,
     )
     return data_loader
-
 
 def trivial_batch_collator(batch):
     """

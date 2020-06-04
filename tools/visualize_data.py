@@ -34,6 +34,7 @@ def parse_args(in_args=None):
     parser.add_argument("--config-file", metavar="FILE", help="path to config file")
     parser.add_argument("--output-dir", default="./", help="path to output directory")
     parser.add_argument("--show", action="store_true", help="show output in a window")
+    parser.add_argument("--show_batch", action="store_true", help="show output in a window")
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
@@ -53,20 +54,34 @@ if __name__ == "__main__":
     os.makedirs(dirname, exist_ok=True)
     metadata = MetadataCatalog.get(cfg.DATASETS.TRAIN[0])
 
-    def output(vis, fname):
+    def output(vis, fname=''):
+
         if args.show:
             print(fname)
+            cv2.namedWindow("window", cv2.WINDOW_NORMAL)
             cv2.imshow("window", vis.get_image()[:, :, ::-1])
+            cv2.waitKey(100)
+
+        elif args.show_batch:
+            h1 = cv2.hconcat((vis[1], vis[0], vis[2]))
+            h2 = cv2.hconcat((vis[5], vis[3], vis[4]))
+            v1 = cv2.vconcat((h1, h2))
+
+            cv2.namedWindow('6im', cv2.WINDOW_NORMAL)
+            cv2.imshow('6im', v1)
             cv2.waitKey()
+        
         else:
             filepath = os.path.join(dirname, fname)
             print("Saving to {} ...".format(filepath))
             vis.save(filepath)
 
+
     scale = 2.0 if args.show else 1.0
     if args.source == "dataloader":
         train_data_loader = build_detection_train_loader(cfg)
         for batch in train_data_loader:
+            ims = []
             for per_image in batch:
                 # Pytorch tensor is in (C, H, W) format
                 img = per_image["image"].permute(1, 2, 0).cpu().detach().numpy()
@@ -81,7 +96,13 @@ if __name__ == "__main__":
                     masks=target_fields.get("gt_masks", None),
                     keypoints=target_fields.get("gt_keypoints", None),
                 )
-                output(vis, str(per_image["image_id"]) + ".jpg")
+                if args.show_batch:
+                    ims.append(vis.get_image()[:, :, ::-1])
+                else:
+                    output(vis, str(per_image["image_id"]) + ".jpg")
+            if args.show_batch:
+                output(ims)
+
     else:
         dicts = list(chain.from_iterable([DatasetCatalog.get(k) for k in cfg.DATASETS.TRAIN]))
         if cfg.MODEL.KEYPOINT_ON:
