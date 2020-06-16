@@ -32,7 +32,7 @@ MODEL:
   WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
 DATASETS:
   TRAIN: ("nuscenes_train_ring",)
-  TEST: ("nuscenes_val_ring",)
+  TEST: ("nuscenes_minival_ring",)
 DATALOADER:
   SAMPLER_TRAIN: "RingTrainingSampler"
   FILTER_EMPTY_ANNOTATIONS: False

@@ -252,6 +252,7 @@ class nuScenesEvaluator(DatasetEvaluator):
             "segm": ["AP", "AP50", "AP75", "APs", "APm", "APl"],
             "keypoints": ["AP", "AP50", "AP75", "APm", "APl"],
         }[iou_type]
+        print(metrics)
 
         if coco_eval is None:
             self._logger.warn("No predictions from the model!")
@@ -483,6 +484,10 @@ def _evaluate_predictions_on_coco(coco_gt, coco_results, iou_type, kpt_oks_sigma
     """
     assert len(coco_results) > 0
 
+    if iou_type == "embeddings":
+        print('HELLO, here it is supposed to be the evaluation of the embeddings. CIAO.')
+        return 
+
     if iou_type == "segm":
         coco_results = copy.deepcopy(coco_results)
         # When evaluating mask AP, if the results contain bbox, cocoapi will
@@ -506,9 +511,6 @@ def _evaluate_predictions_on_coco(coco_gt, coco_results, iou_type, kpt_oks_sigma
             "keypoints! For more information please refer to "
             "http://cocodataset.org/#keypoints-eval.".format(num_keypoints)
         )
-
-    if iou_type == "embeddings":
-        print('HELLO, here it is supposed to be the evaluation of the embeddings. CIAO.')
 
     coco_eval.evaluate()
     coco_eval.accumulate()
